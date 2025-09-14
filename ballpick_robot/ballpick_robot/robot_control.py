@@ -55,9 +55,9 @@ class PIDController:
 class PositionController:
     def __init__(self):
         # PID控制器用于控制X位置、Y位置和偏航角(Yaw)
-        self.pid_x = PIDController(kp=0.5, ki=0.01, kd=0.05, max_output=0.1, min_output=-0.1)
-        self.pid_y = PIDController(kp=0.5, ki=0.01, kd=0.05, max_output=0.1, min_output=-0.1)
-        self.pid_yaw = PIDController(kp=1.0, ki=0.0, kd=0.0, max_output=1.0, min_output=-1.0)
+        self.pid_x = PIDController(kp=1.8, ki=0.01, kd=0.05, max_output=0.5, min_output=-0.5)
+        self.pid_y = PIDController(kp=1.8, ki=0.01, kd=0.05, max_output=0.5, min_output=-0.5)
+        self.pid_yaw = PIDController(kp=5.0, ki=0.01, kd=0.0, max_output=1.0, min_output=-1.0)
 
     def get_control(self, current_pose, target_pose):
         """
@@ -87,7 +87,7 @@ class PositionController:
         # 对于阿克曼小车，Y方向的误差需要通过转向来消除，可以将其映射到角速度
         # 同时，结合X方向的控制量和Yaw方向的控制量
         linear_x = control_x  # 主要根据X方向的误差控制前进后退
-        angular_z = control_yaw + control_y * 0.5  # 角速度由朝向误差和Y方向误差共同决定
+        angular_z = control_yaw + control_y * 1.0  # 角速度由朝向误差和Y方向误差共同决定
 
         return linear_x, angular_z
     
@@ -167,7 +167,7 @@ class RobotControl(Node):
             self.path_points = [(0.3, 0.3), (0.6, 0.3)]  # 你的路径点序列
         elif self.controller_type == "pid_position":
             self.position_controller = PositionController()
-            self.target_pose = (1.0, 0.0, 0.0)  # 目标位姿 (x, y, yaw)        
+            self.target_pose = (1.0, 0.1, 0.0)  # 目标位姿 (x, y, yaw)        
 
         self.tf_timer = self.create_timer(0.2, self.tf_callback) # 创建tf定时器
         self.timer = self.create_timer(0.2, self.timer_callback) # 创建定时器
