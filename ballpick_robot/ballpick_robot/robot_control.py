@@ -157,7 +157,7 @@ class RobotControl(Node):
         # 节点初始化
         super().__init__('robot_control')
         self.publisher_ = self.create_publisher(Twist, 'cmd_vel', 10) # 创建发布者
-        self.imu_subscriber_ = self.create_subscription(Imu, 'imu', self.imu_callback, 10) # 创建订阅者
+        # self.imu_subscriber_ = self.create_subscription(Imu, 'imu', self.imu_callback, 10) # 创建订阅者
         self.tf_buffer_ = Buffer()
         self.tf_listener_ = TransformListener(self.tf_buffer_, self) # 创建tf监听器
 
@@ -502,29 +502,29 @@ class RobotControl(Node):
     #         self.send_stop_command()
     #         self.disconnect()
 
-    def imu_callback(self, msg):
-        try:
-            # 从IMU消息中获取四元数姿态
-            orientation = msg.orientation
-            quaternion = (
-                orientation.x,
-                orientation.y,
-                orientation.z,
-                orientation.w
-            )
-            # self.get_logger().info(f"IMU四元数: {quaternion}")
-            # 将四元数转换为欧拉角 (roll, pitch, yaw)
-            #(self.roll, self.pitch, self.yaw) = tf_transformations.euler_from_quaternion(quaternion)
+    # def imu_callback(self, msg):
+    #     try:
+    #         # 从IMU消息中获取四元数姿态
+    #         orientation = msg.orientation
+    #         quaternion = (
+    #             orientation.x,
+    #             orientation.y,
+    #             orientation.z,
+    #             orientation.w
+    #         )
+    #         # self.get_logger().info(f"IMU四元数: {quaternion}")
+    #         # 将四元数转换为欧拉角 (roll, pitch, yaw)
+    #         #(self.roll, self.pitch, self.yaw) = tf_transformations.euler_from_quaternion(quaternion)
             
-            # 记录IMU数据
-            # self.get_logger().info(
-            #     f"IMU欧拉角 - Roll: {self.roll:.2f}°, "
-            #     f"Pitch: {self.pitch:.2f}°, "
-            #     f"Yaw: {self.yaw:.2f}°"
-            # )
+    #         # 记录IMU数据
+    #         # self.get_logger().info(
+    #         #     f"IMU欧拉角 - Roll: {self.roll:.2f}°, "
+    #         #     f"Pitch: {self.pitch:.2f}°, "
+    #         #     f"Yaw: {self.yaw:.2f}°"
+    #         # )
             
-        except Exception as e:
-            self.get_logger().error(f"处理IMU数据时出错: {e}")
+    #     except Exception as e:
+    #         self.get_logger().error(f"处理IMU数据时出错: {e}")
 
 
 
