@@ -1,9 +1,8 @@
 import rclpy
 from rclpy.node import Node
-from geometry_msgs.msg import Twist
+from geometry_msgs.msg import Twist, PoseStamped
 import numpy as np
 from tf2_ros import Buffer, TransformListener
-from sensor_msgs.msg import Imu
 import tf_transformations
 import serial
 import serial.tools.list_ports
@@ -11,7 +10,6 @@ import struct
 import threading
 import time
 import math
-import signal
 
 class PIDController:
     def __init__(self, kp, ki, kd, max_output=float('inf'), min_output=-float('inf')):
@@ -92,64 +90,94 @@ class PositionController:
         return linear_x, angular_z
     
 class PurePursuitController:
-    def __init__(self, lookahead_distance):
-        self.lookahead_distance = lookahead_distance  # 预瞄距离
-
-    def find_lookahead_point(self, current_pose, path_points):
+    def __init__(self):
+        # 前视距离参数
+        self.lookahead_distance = 0.5  # 前视距离，单位米
+        # 比例系数
+        self.k = 0.5  # 前视距离调整系数
+        # 最大线速度和角速度
+        self.max_linear_speed = 0.5  # 最大线速度，单位 m/s
+        self.max_angular_speed = 1.0  # 最大角速度，单位 rad/s
+        # 距离阈值，当小于此值时认为到达目标
+        self.distance_threshold = 0.1  # 单位米
+        # 角度阈值，当小于此值时认为方向正确
+        self.angle_threshold = 0.1  # 单位 rad
+        # 减速距离，当小于此距离时开始减速
+        self.deceleration_distance = 0.5  # 单位米
+        
+    def get_control(self, current_pose, target_pose):
         """
-        在给定的路径点序列中查找距离当前位姿最近的点，并从该点开始向前寻找第一个超过预瞄距离的点作为目标点。
+        计算纯追踪控制指令
         :param current_pose: 小车当前位姿 (x, y, yaw)
-        :param path_points: 列表，包含路径点的坐标 [(x0, y0), (x1, y1), ...]
-        :return: 目标点坐标 (x_goal, y_goal)
-        """
-        # 1. 找到距离当前点最近的路径点
-        current_x, current_y, current_yaw = current_pose
-        distances = [np.sqrt((x - current_x)**2 + (y - current_y)**2) for x, y in path_points]
-        closest_idx = np.argmin(distances)
-
-        # 2. 从最近点开始向后查找第一个超过预瞄距离的点
-        for i in range(closest_idx, len(path_points)):
-            x, y = path_points[i]
-            distance_to_current = np.sqrt((x - current_x)**2 + (y - current_y)**2)
-            if distance_to_current >= self.lookahead_distance:
-                return (x, y)
-        # 如果找不到，返回最后一个路径点
-        return path_points[-1]
-
-    def compute_curvature(self, current_pose, goal_point):
-        """
-        计算从当前位姿到目标点的曲率。
-        :param current_pose: 小车当前位姿 (x, y, yaw)
-        :param goal_point: 目标点坐标 (x_goal, y_goal)
-        :return: 曲率 (kappa)
+        :param target_pose: 目标位姿 (x_target, y_target, yaw_target)
+        :return: 线速度 (linear.x), 角速度 (angular.z)
         """
         current_x, current_y, current_yaw = current_pose
-        x_goal, y_goal = goal_point
-
+        target_x, target_y, target_yaw = target_pose
+        
+        # 计算当前位置到目标位置的距离
+        dx = target_x - current_x
+        dy = target_y - current_y
+        distance_to_target = math.sqrt(dx**2 + dy**2)
+        
+        # 计算目标点相对于小车坐标系的位置
         # 将目标点转换到小车坐标系
-        dx = x_goal - current_x
-        dy = y_goal - current_y
-        local_x = dx * np.cos(current_yaw) + dy * np.sin(current_yaw)
-        local_y = -dx * np.sin(current_yaw) + dy * np.cos(current_yaw)
-
-        # 计算曲率 (kappa) = 2 * (横向误差) / (预瞄距离^2)
-        # 曲率与角速度的关系: omega = linear.x * kappa
-        curvature = 2.0 * local_y / (self.lookahead_distance**2)
-        return curvature
-
-    def get_control(self, current_pose, path_points, current_speed):
-        """
-        计算控制指令。
-        :param current_pose: 小车当前位姿 (x, y, yaw)
-        :param path_points: 列表，包含路径点的坐标 [(x0, y0), (x1, y1), ...]
-        :param current_speed: 小车当前速度，用于动态调整预瞄距离（可选）
-        :return: 角速度 (angular.z)
-        """
-        goal_point = self.find_lookahead_point(current_pose, path_points)
-        curvature = self.compute_curvature(current_pose, goal_point)
+        local_x = dx * math.cos(current_yaw) + dy * math.sin(current_yaw)
+        local_y = -dx * math.sin(current_yaw) + dy * math.cos(current_yaw)
+        
+        # 计算目标方向与当前方向的夹角
+        target_angle = math.atan2(dy, dx)
+        angle_error = target_angle - current_yaw
+        # 规范化角度误差到 [-pi, pi]
+        angle_error = math.atan2(math.sin(angle_error), math.cos(angle_error))
+        
+        # 判断是否到达目标
+        if distance_to_target < self.distance_threshold:
+            return 0.0, 0.0  # 已到达目标，停止
+        
+        # 动态调整前视距离
+        lookahead_distance = min(self.k * distance_to_target, self.lookahead_distance)
+        
+        # 计算曲率和角速度
+        # 对于纯追踪算法，曲率 k = 2*local_y / lookahead_distance^2
         # 角速度 = 线速度 * 曲率
-        angular_z = current_speed * curvature
-        return angular_z
+        if abs(local_y) < 0.01:  # 避免除以零
+            angular_z = 0.0
+        else:
+            # 计算曲率
+            curvature = 2 * local_y / (lookahead_distance ** 2)
+            # 计算角速度（需要先确定线速度）
+            
+        # 计算线速度（根据距离和角度误差调整）
+        # 当距离较远且方向大致正确时，使用最大线速度
+        # 当接近目标或方向偏差较大时，降低线速度
+        if distance_to_target > self.deceleration_distance and abs(angle_error) < self.angle_threshold:
+            linear_x = self.max_linear_speed
+        else:
+            # 距离目标较近或方向偏差较大时，减速
+            linear_x = self.max_linear_speed * min(1.0, distance_to_target / self.deceleration_distance)
+            # 如果方向偏差很大，进一步减速
+            if abs(angle_error) > self.angle_threshold * 3:
+                linear_x *= 0.5
+        
+        # 重新计算角速度
+        if abs(local_y) >= 0.01:
+            angular_z = linear_x * curvature
+        else:
+            angular_z = 0.0
+        
+        # 限制角速度
+        angular_z = max(-self.max_angular_speed, min(self.max_angular_speed, angular_z))
+        
+        # 可以根据角度误差额外调整角速度
+        # 当角度偏差较大时，增加额外的角速度分量来快速调整方向
+        angle_adjustment = 0.5 * angle_error  # 角度调整系数
+        angular_z += angle_adjustment
+        
+        # 再次限制角速度
+        angular_z = max(-self.max_angular_speed, min(self.max_angular_speed, angular_z))
+        
+        return linear_x, angular_z
 
 class RobotControl(Node):
 
@@ -157,22 +185,18 @@ class RobotControl(Node):
         # 节点初始化
         super().__init__('robot_control')
         self.publisher_ = self.create_publisher(Twist, 'cmd_vel', 10) # 创建发布者
-        # self.imu_subscriber_ = self.create_subscription(Imu, 'imu', self.imu_callback, 10) # 创建订阅者
+        self.goal_subcriber_ = self.create_subscription(PoseStamped, 'goal_pose', self.goal_pose_callback, 10) # 创建订阅者
         self.tf_buffer_ = Buffer()
         self.tf_listener_ = TransformListener(self.tf_buffer_, self) # 创建tf监听器
-
-        self.controller_type = "pid_position"  # "pure_pursuit"/"pid_position"/"stop_and_wait"
+        self.controller_type = "pure_pursuit"  # "pure_pursuit"/"pid_position"/"stop_and_wait"
+        self.target_pose = (1.0, 0.1, 0.0)  # 目标位姿 (x, y, yaw) 
         if self.controller_type == "pure_pursuit":
-            self.pure_pursuit_controller = PurePursuitController(lookahead_distance=0.1)
-            self.path_points = [(0.3, 0.3), (0.6, 0.3)]  # 你的路径点序列
+            self.pure_pursuit_controller = PurePursuitController()
         elif self.controller_type == "pid_position":
             self.position_controller = PositionController()
-            self.target_pose = (1.0, 0.1, 0.0)  # 目标位姿 (x, y, yaw)        
-
+                  
         self.tf_timer = self.create_timer(0.2, self.tf_callback) # 创建tf定时器
         self.timer = self.create_timer(0.2, self.timer_callback) # 创建定时器
-        # self.send_control_command(0.0, 0.0, 0.0) # 发送初始指令
-
 
         # 串口参数配置
         self.ser = None
@@ -197,8 +221,6 @@ class RobotControl(Node):
         self.roll = 0.0
         self.pitch = 0.0
         self.yaw = 0.0
-        
-        # signal.signal(signal.SIGINT, self.signal_handler) # 处理Ctrl+C信号
             
         # 自动检测串口设备
         if not self.port:
@@ -428,9 +450,8 @@ class RobotControl(Node):
                 current_y = self.y / 1000.0  # 转换为米
                 current_yaw = self.yaw
                 current_pose = (current_x, current_y, current_yaw)
-
-                target_linear_x = 0.1  # m/s
-                target_angular_z = self.pure_pursuit_controller.get_control(current_pose, self.path_points, target_linear_x)
+                
+                target_linear_x, target_angular_z = self.pure_pursuit_controller.get_control(current_pose, self.target_pose)
                 self.send_control_command(target_linear_x * 1000, 0, target_angular_z)
             elif self.controller_type == "pid_position":
                 current_x = self.x / 1000.0  # 转换为米
@@ -459,21 +480,18 @@ class RobotControl(Node):
         except Exception as e:
             self.get_logger().error(f"TF错误: {e}")   
     
-    # def signal_handler(self, signum, frame):
-    #     """处理中断信号"""
-    #     self.get_logger().info("接收到中断信号，正在停止小车...")
-    #     self.running = False
-    #     self.need_stop = True
-    #     self.send_stop_command()
-
-    #     if hasattr(self, 'tf_timer'):
-    #         self.tf_timer.cancel()
-    #     if hasattr(self, 'timer'):
-    #         self.timer.cancel()
-
-    #     self.disconnect()
-    #     # rclpy.shutdown()
-
+    def goal_pose_callback(self, msg):
+        # 订阅目标位姿
+        if msg.pose.position.x != 0.0 and msg.pose.position.y != 0.0:
+            target_qx = msg.pose.orientation.x
+            target_qy = msg.pose.orientation.y
+            target_qz = msg.pose.orientation.z
+            target_qw = msg.pose.orientation.w
+            (target_roll, target_pitch, target_yaw) = tf_transformations.euler_from_quaternion([target_qx, target_qy, target_qz, target_qw])
+            self.target_pose = (msg.pose.position.x, msg.pose.position.y, target_yaw)
+            self.get_logger().info(f"目标位姿: X={self.target_pose[0]:.1f} mm, Y={self.target_pose[1]:.1f} mm, θ={math.degrees(self.target_pose[2]):.1f}°")
+        
+    
     def send_stop_command(self):
         """发送停止指令，尝试多次"""
         max_retries = 5
@@ -495,38 +513,6 @@ class RobotControl(Node):
                 self.get_logger().error(f"第{i+1}次尝试发送停止指令失败: {e}")
                 # 释放设备并尝试重新连接
                 time.sleep(0.2)
-
-    # def __del__(self):
-    #     """析构函数，确保对象销毁时发送停止指令"""
-    #     if not self.stop_sent:
-    #         self.send_stop_command()
-    #         self.disconnect()
-
-    # def imu_callback(self, msg):
-    #     try:
-    #         # 从IMU消息中获取四元数姿态
-    #         orientation = msg.orientation
-    #         quaternion = (
-    #             orientation.x,
-    #             orientation.y,
-    #             orientation.z,
-    #             orientation.w
-    #         )
-    #         # self.get_logger().info(f"IMU四元数: {quaternion}")
-    #         # 将四元数转换为欧拉角 (roll, pitch, yaw)
-    #         #(self.roll, self.pitch, self.yaw) = tf_transformations.euler_from_quaternion(quaternion)
-            
-    #         # 记录IMU数据
-    #         # self.get_logger().info(
-    #         #     f"IMU欧拉角 - Roll: {self.roll:.2f}°, "
-    #         #     f"Pitch: {self.pitch:.2f}°, "
-    #         #     f"Yaw: {self.yaw:.2f}°"
-    #         # )
-            
-    #     except Exception as e:
-    #         self.get_logger().error(f"处理IMU数据时出错: {e}")
-
-
 
 def main(args=None):
     rclpy.init(args=args)
