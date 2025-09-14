@@ -68,11 +68,11 @@ class PositionController:
         target_x, target_y, target_yaw = target_pose
 
         # 将目标点转换到小车坐标系
-        dx = target_x - current_x
-        dy = target_y - current_y
+        error_x = target_x - current_x
+        error_y = target_y - current_y
         # 计算在小车坐标系下的误差
-        error_x = dx * np.cos(current_yaw) + dy * np.sin(current_yaw)
-        error_y = -dx * np.sin(current_yaw) + dy * np.cos(current_yaw)
+        # error_x = dx * np.cos(current_yaw) + dy * np.sin(current_yaw)
+        # error_y = -dx * np.sin(current_yaw) + dy * np.cos(current_yaw)
         error_yaw = target_yaw - current_yaw
         # 规范化角度误差到 [-pi, pi]
         error_yaw = np.arctan2(np.sin(error_yaw), np.cos(error_yaw))
