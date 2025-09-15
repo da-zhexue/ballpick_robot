@@ -12,18 +12,21 @@ import time
 import math
 
 class PIDController:
-    def __init__(self, kp, ki, kd, max_output=float('inf'), min_output=-float('inf')):
+    def __init__(self, kp, ki, kd, max_output=float('inf'), min_output=-float('inf'), deadhand=0.1):
         self.kp = kp
         self.ki = ki
         self.kd = kd
         self.max_output = max_output
         self.min_output = min_output
+        self.deadband = deadhand
         self.integral = 0.0
         self.prev_error = 0.0
         self.last_time = time.time()
 
     def compute(self, setpoint, current_value):
         error = current_value - setpoint
+        if abs(error) < self.deadband:
+            return 0.0
         current_time = time.time()
         dt = current_time - self.last_time
         self.last_time = current_time
@@ -53,9 +56,9 @@ class PIDController:
 class PositionController:
     def __init__(self):
         # PID控制器用于控制X位置、Y位置和偏航角(Yaw)
-        self.pid_x = PIDController(kp=1.8, ki=0.01, kd=0.05, max_output=0.5, min_output=-0.5)
-        self.pid_y = PIDController(kp=1.8, ki=0.01, kd=0.05, max_output=0.5, min_output=-0.5)
-        self.pid_yaw = PIDController(kp=5.0, ki=0.01, kd=0.0, max_output=1.0, min_output=-1.0)
+        self.pid_x = PIDController(kp=0.8, ki=0.01, kd=0.05, max_output=0.5, min_output=-0.5, deadhand=0.1)
+        self.pid_y = PIDController(kp=1.6, ki=0.015, kd=0.01, max_output=0.5, min_output=-0.5, deadhand=0.05)
+        self.pid_yaw = PIDController(kp=5.0, ki=0.01, kd=0.02, max_output=1.0, min_output=-1.0, deadhand=0.05)
 
     def get_control(self, current_pose, target_pose):
         """
@@ -68,15 +71,15 @@ class PositionController:
         target_x, target_y, target_yaw = target_pose
 
         # 将目标点转换到小车坐标系
-        error_x = target_x - current_x
-        error_y = target_y - current_y
+        dx = target_x - current_x
+        dy = target_y - current_y
         # 计算在小车坐标系下的误差
-        # error_x = dx * np.cos(current_yaw) + dy * np.sin(current_yaw)
-        # error_y = -dx * np.sin(current_yaw) + dy * np.cos(current_yaw)
+        error_x = dx * np.cos(current_yaw) + dy * np.sin(current_yaw)
+        error_y = -dx * np.sin(current_yaw) + dy * np.cos(current_yaw)
         error_yaw = target_yaw - current_yaw
         # 规范化角度误差到 [-pi, pi]
         error_yaw = np.arctan2(np.sin(error_yaw), np.cos(error_yaw))
-        print(f"error_x: {error_x}, error_y: {error_y}, error_yaw: {error_yaw}")
+        # print(f"error_x: {error_x}, error_y: {error_y}, error_yaw: {error_yaw}")
         # 使用PID控制器计算控制量
         control_x = self.pid_x.compute(0.0, error_x)  # 目标是在小车坐标系下X误差为0
         control_y = self.pid_y.compute(0.0, error_y)  # 目标是在小车坐标系下Y误差为0
@@ -85,99 +88,60 @@ class PositionController:
         # 对于阿克曼小车，Y方向的误差需要通过转向来消除，可以将其映射到角速度
         # 同时，结合X方向的控制量和Yaw方向的控制量
         linear_x = control_x  # 主要根据X方向的误差控制前进后退
-        angular_z = control_yaw + control_y * 1.0  # 角速度由朝向误差和Y方向误差共同决定
+        angular_z = control_yaw - control_y * 2.0  # 角速度由朝向误差和Y方向误差共同决定
 
         return linear_x, angular_z
-    
+
 class PurePursuitController:
-    def __init__(self):
-        # 前视距离参数
-        self.lookahead_distance = 0.5  # 前视距离，单位米
-        # 比例系数
-        self.k = 0.5  # 前视距离调整系数
-        # 最大线速度和角速度
-        self.max_linear_speed = 0.5  # 最大线速度，单位 m/s
-        self.max_angular_speed = 1.0  # 最大角速度，单位 rad/s
-        # 距离阈值，当小于此值时认为到达目标
-        self.distance_threshold = 0.1  # 单位米
-        # 角度阈值，当小于此值时认为方向正确
-        self.angle_threshold = 0.1  # 单位 rad
-        # 减速距离，当小于此距离时开始减速
-        self.deceleration_distance = 0.5  # 单位米
-        
+    def __init__(self, lookahead_distance=0.1, max_linear_speed=0.3, max_angular_speed=1.0):
+        self.lookahead_distance = lookahead_distance  # 前视距离 (米)
+        self.max_linear_speed = max_linear_speed      # 最大线速度 (m/s)
+        self.max_angular_speed = max_angular_speed    # 最大角速度 (rad/s)
+
     def get_control(self, current_pose, target_pose):
         """
-        计算纯追踪控制指令
-        :param current_pose: 小车当前位姿 (x, y, yaw)
-        :param target_pose: 目标位姿 (x_target, y_target, yaw_target)
-        :return: 线速度 (linear.x), 角速度 (angular.z)
+        计算控制指令
+        :param current_pose: (x, y, yaw) 当前坐标 (米, 米, 弧度)
+        :param target_pose: (x, y, yaw) 目标坐标 (米, 米, 弧度)
+        :return: (linear_x, angular_z)
         """
-        current_x, current_y, current_yaw = current_pose
-        target_x, target_y, target_yaw = target_pose
-        
-        # 计算当前位置到目标位置的距离
-        dx = target_x - current_x
-        dy = target_y - current_y
-        distance_to_target = math.sqrt(dx**2 + dy**2)
-        
-        # 计算目标点相对于小车坐标系的位置
-        # 将目标点转换到小车坐标系
-        local_x = dx * math.cos(current_yaw) + dy * math.sin(current_yaw)
-        local_y = -dx * math.sin(current_yaw) + dy * math.cos(current_yaw)
-        
-        # 计算目标方向与当前方向的夹角
-        target_angle = math.atan2(dy, dx)
-        angle_error = target_angle - current_yaw
-        # 规范化角度误差到 [-pi, pi]
-        angle_error = math.atan2(math.sin(angle_error), math.cos(angle_error))
-        
-        # 判断是否到达目标
-        if distance_to_target < self.distance_threshold:
-            return 0.0, 0.0  # 已到达目标，停止
-        
-        # 动态调整前视距离
-        lookahead_distance = min(self.k * distance_to_target, self.lookahead_distance)
-        
-        # 计算曲率和角速度
-        # 对于纯追踪算法，曲率 k = 2*local_y / lookahead_distance^2
-        # 角速度 = 线速度 * 曲率
-        if abs(local_y) < 0.01:  # 避免除以零
-            angular_z = 0.0
-        else:
-            # 计算曲率
-            curvature = 2 * local_y / (lookahead_distance ** 2)
-            # 计算角速度（需要先确定线速度）
-            
-        # 计算线速度（根据距离和角度误差调整）
-        # 当距离较远且方向大致正确时，使用最大线速度
-        # 当接近目标或方向偏差较大时，降低线速度
-        if distance_to_target > self.deceleration_distance and abs(angle_error) < self.angle_threshold:
-            linear_x = self.max_linear_speed
-        else:
-            # 距离目标较近或方向偏差较大时，减速
-            linear_x = self.max_linear_speed * min(1.0, distance_to_target / self.deceleration_distance)
-            # 如果方向偏差很大，进一步减速
-            if abs(angle_error) > self.angle_threshold * 3:
-                linear_x *= 0.5
-        
-        # 重新计算角速度
-        if abs(local_y) >= 0.01:
-            angular_z = linear_x * curvature
-        else:
-            angular_z = 0.0
-        
+        x, y, yaw = current_pose
+        tx, ty, tyaw = target_pose
+
+        # 计算到目标点的距离和角度
+        dx = tx - x
+        dy = ty - y
+        distance = math.hypot(dx, dy)
+
+        # 到目标点的方向（全局坐标系下）
+        target_theta = math.atan2(dy, dx)
+        # 与当前车体朝向夹角
+        alpha = self._normalize_angle(target_theta - yaw)
+
+        # 若距离小于前视距离，则直接减速到目标
+        if distance < 0.1:
+            return 0.0, 0.0
+
+        # 纯追踪算法核心公式
+        # 转向半径 R = L / (2*sin(alpha))
+        # 角速度 w = v / R
+        # 转化后：w = 2*v*sin(alpha) / L
+        # v = max_linear_speed * (距离/前视距离, 最大为1)
+        v = min(self.max_linear_speed, self.max_linear_speed * (distance / self.lookahead_distance))
+        w = 2 * v * math.sin(alpha) / self.lookahead_distance
+
         # 限制角速度
-        angular_z = max(-self.max_angular_speed, min(self.max_angular_speed, angular_z))
-        
-        # 可以根据角度误差额外调整角速度
-        # 当角度偏差较大时，增加额外的角速度分量来快速调整方向
-        angle_adjustment = 0.5 * angle_error  # 角度调整系数
-        angular_z += angle_adjustment
-        
-        # 再次限制角速度
-        angular_z = max(-self.max_angular_speed, min(self.max_angular_speed, angular_z))
-        
-        return linear_x, angular_z
+        w = max(-self.max_angular_speed, min(self.max_angular_speed, w))
+
+        return v, -w
+
+    def _normalize_angle(self, angle):
+        """将任意弧度归一化到 [-pi, pi]"""
+        while angle > math.pi:
+            angle -= 2.0 * math.pi
+        while angle < -math.pi:
+            angle += 2.0 * math.pi
+        return angle
 
 class RobotControl(Node):
 
@@ -188,15 +152,15 @@ class RobotControl(Node):
         self.goal_subcriber_ = self.create_subscription(PoseStamped, 'goal_pose', self.goal_pose_callback, 10) # 创建订阅者
         self.tf_buffer_ = Buffer()
         self.tf_listener_ = TransformListener(self.tf_buffer_, self) # 创建tf监听器
-        self.controller_type = "pure_pursuit"  # "pure_pursuit"/"pid_position"/"stop_and_wait"
-        self.target_pose = (1.0, 0.1, 0.0)  # 目标位姿 (x, y, yaw) 
+        self.controller_type = "pid_position"  # "pure_pursuit"/"pid_position"/"stop_and_wait"
+        self.target_pose = (1.0, -0.2, 0.0)  # 目标位姿 (x, y, yaw) 
         if self.controller_type == "pure_pursuit":
             self.pure_pursuit_controller = PurePursuitController()
         elif self.controller_type == "pid_position":
             self.position_controller = PositionController()
                   
-        self.tf_timer = self.create_timer(0.2, self.tf_callback) # 创建tf定时器
-        self.timer = self.create_timer(0.2, self.timer_callback) # 创建定时器
+        self.tf_timer = self.create_timer(0.1, self.tf_callback) # 创建tf定时器
+        self.timer = self.create_timer(0.1, self.timer_callback) # 创建定时器
 
         # 串口参数配置
         self.ser = None
@@ -333,7 +297,7 @@ class RobotControl(Node):
         try:
             self.ser.write(packet)
             self.ser.flush()
-            print(f"已发送控制指令: X轴速度 {x_speed:.1f} mm/s, Y轴速度 {y_speed:.1f} mm/s, Z轴角速度 {z_speed:.3f} rad/s")
+            self.get_logger().info(f"已发送控制指令: X轴速度 {x_speed:.1f} mm/s, Y轴速度 {y_speed:.1f} mm/s, Z轴角速度 {z_speed:.3f} rad/s")
             return True
         except Exception as e:
             print(f"发送失败: {e}")
@@ -443,7 +407,7 @@ class RobotControl(Node):
         # 发送控制指令
         if self.running:
             if self.controller_type == "stop_and_wait":
-                self.send_control_command(200, 0, 0.0)
+                self.send_control_command(500, 0, 0.5)
             elif self.controller_type == "pure_pursuit":
                 # 计算控制指令
                 current_x = self.x / 1000.0  # 转换为米
@@ -512,7 +476,7 @@ class RobotControl(Node):
             except Exception as e:
                 self.get_logger().error(f"第{i+1}次尝试发送停止指令失败: {e}")
                 # 释放设备并尝试重新连接
-                time.sleep(0.2)
+                time.sleep(0.1)
 
 def main(args=None):
     rclpy.init(args=args)

@@ -1,6 +1,6 @@
 import launch
 from launch_ros.actions import Node
-from launch.actions import IncludeLaunchDescription
+from launch.actions import IncludeLaunchDescription, TimerAction
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.substitutions import FindPackageShare
 import os
@@ -34,10 +34,15 @@ def generate_launch_description():
         PythonLaunchDescriptionSource(cartographer_launch_file_path),
     )
 
+    delayed_robot_control = TimerAction(
+        period=5.0,  # 延迟5秒
+        actions=[robot_control_node]
+    )
+
     return launch.LaunchDescription([
         lidar_node,
         imu_node,
         cartographer_node,
-        robot_control_node,
+        delayed_robot_control,
 
     ])
