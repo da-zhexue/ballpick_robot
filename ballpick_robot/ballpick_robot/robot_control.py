@@ -1,6 +1,7 @@
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist, PoseStamped
+import tf2_geometry_msgs
 import numpy as np
 from tf2_ros import Buffer, TransformListener
 import tf_transformations
@@ -447,12 +448,21 @@ class RobotControl(Node):
     def goal_pose_callback(self, msg):
         # 订阅目标位姿
         if msg.pose.position.x != 0.0 and msg.pose.position.y != 0.0:
-            target_qx = msg.pose.orientation.x
-            target_qy = msg.pose.orientation.y
-            target_qz = msg.pose.orientation.z
-            target_qw = msg.pose.orientation.w
+            transform = self.tf_buffer_.lookup_transform(
+                'map',  # 目标坐标系
+                msg.header.frame_id,  # 源坐标系（来自消息）
+                rclpy.time.Time(),  # 使用最新可用的变换
+                timeout=rclpy.duration.Duration(seconds=0.5)
+            )
+        
+            # 使用 tf2_geometry_msgs 中的 do_transform_pose 进行坐标转换
+            transformed_pose = tf2_geometry_msgs.do_transform_pose(msg.pose, transform)
+            target_qx = transformed_pose.orientation.x
+            target_qy = transformed_pose.orientation.y
+            target_qz = transformed_pose.orientation.z
+            target_qw = transformed_pose.orientation.w
             (target_roll, target_pitch, target_yaw) = tf_transformations.euler_from_quaternion([target_qx, target_qy, target_qz, target_qw])
-            self.target_pose = (msg.pose.position.x, msg.pose.position.y, target_yaw)
+            self.target_pose = (transformed_pose.position.x, transformed_pose.position.y, target_yaw)
             self.get_logger().info(f"目标位姿: X={self.target_pose[0]:.1f} mm, Y={self.target_pose[1]:.1f} mm, θ={math.degrees(self.target_pose[2]):.1f}°")
         
     
