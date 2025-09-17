@@ -22,7 +22,8 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'robot_control = ballpick_robot.robot_control:main'
+            'robot_control = ballpick_robot.robot_control:main',
+            'goal_pub_temp = ballpick_robot.goal_pub_temp:main'
         ],
     },
 )

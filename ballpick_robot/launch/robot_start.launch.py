@@ -39,10 +39,16 @@ def generate_launch_description():
         actions=[robot_control_node]
     )
 
+    goal_pub = Node(
+        package='ballpick_robot',
+        executable='goal_pub_temp',
+        output='screen',
+    )
+
     return launch.LaunchDescription([
         lidar_node,
         imu_node,
         cartographer_node,
         delayed_robot_control,
-
+        goal_pub
     ])

@@ -57,9 +57,9 @@ class PIDController:
 class PositionController:
     def __init__(self):
         # PID控制器用于控制X位置、Y位置和偏航角(Yaw)
-        self.pid_x = PIDController(kp=0.8, ki=0.01, kd=0.05, max_output=0.5, min_output=-0.5, deadhand=0.1)
-        self.pid_y = PIDController(kp=1.6, ki=0.015, kd=0.01, max_output=0.5, min_output=-0.5, deadhand=0.05)
-        self.pid_yaw = PIDController(kp=5.0, ki=0.01, kd=0.02, max_output=1.0, min_output=-1.0, deadhand=0.05)
+        self.pid_x = PIDController(kp=0.73, ki=0.01, kd=0.05, max_output=0.3, min_output=-0.3, deadhand=0.05)
+        self.pid_y = PIDController(kp=14.0, ki=0.01, kd=0.10, max_output=0.8, min_output=-0.8, deadhand=0.05)
+        self.pid_yaw = PIDController(kp=5.5, ki=0.008, kd=0.02, max_output=1.0, min_output=-1.0, deadhand=0.05)
 
     def get_control(self, current_pose, target_pose):
         """
@@ -89,7 +89,7 @@ class PositionController:
         # 对于阿克曼小车，Y方向的误差需要通过转向来消除，可以将其映射到角速度
         # 同时，结合X方向的控制量和Yaw方向的控制量
         linear_x = control_x  # 主要根据X方向的误差控制前进后退
-        angular_z = control_yaw - control_y * 2.0  # 角速度由朝向误差和Y方向误差共同决定
+        angular_z = control_yaw - control_y * 1.0  # 角速度由朝向误差和Y方向误差共同决定
 
         return linear_x, angular_z
 
@@ -442,6 +442,7 @@ class RobotControl(Node):
 
             (self.roll, self.pitch, self.yaw) = tf_transformations.euler_from_quaternion([qx, qy, qz, qw])
             self.get_logger().info(f"当前位置: X={self.x:.1f} mm, Y={self.y:.1f} mm, θ={math.degrees(self.yaw):.1f}°")
+            self.get_logger().info(f"目标位置: X={self.target_pose[0]*1000:.1f} mm, Y={self.target_pose[1]*1000:.1f} mm, θ={math.degrees(self.target_pose[2]):.1f}°")
         except Exception as e:
             self.get_logger().error(f"TF错误: {e}")   
     
@@ -449,8 +450,8 @@ class RobotControl(Node):
         # 订阅目标位姿
         if msg.pose.position.x != 0.0 and msg.pose.position.y != 0.0:
             transform = self.tf_buffer_.lookup_transform(
+                'base_link',  # 源坐标系（来自消息）
                 'map',  # 目标坐标系
-                msg.header.frame_id,  # 源坐标系（来自消息）
                 rclpy.time.Time(),  # 使用最新可用的变换
                 timeout=rclpy.duration.Duration(seconds=0.5)
             )
@@ -490,7 +491,7 @@ class RobotControl(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    robot_control = RobotControl(port="/dev/ttyACM0")
+    robot_control = RobotControl(port="/dev/ttyACM1")
     
     try:
         rclpy.spin(robot_control)
