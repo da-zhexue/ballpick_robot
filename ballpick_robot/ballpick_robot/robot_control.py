@@ -196,6 +196,9 @@ class RobotControl(Node):
         else:
             self.get_logger().error("串口连接失败")
         
+        self.target_pose_reached_pub = self.create_publisher(
+        rclpy.msg.Bool, '/target_pose_reached', 10)
+
     def _auto_detect_port(self):
         """自动检测可能的USB串口设备"""
         ports = serial.tools.list_ports.comports()
@@ -407,6 +410,7 @@ class RobotControl(Node):
     def timer_callback(self):
         # 发送控制指令
         if self.running:
+            reached = False
             if self.controller_type == "stop_and_wait":
                 self.send_control_command(500, 0, 0.5)
             elif self.controller_type == "pure_pursuit":
@@ -426,6 +430,12 @@ class RobotControl(Node):
 
                 target_linear_x, target_angular_z = self.position_controller.get_control(current_pose, self.target_pose)
                 self.send_control_command(target_linear_x * 1000, 0, target_angular_z)  # 将m/s转换为mm/s
+            # 发布目标到达状态
+            if abs(target_linear_x) < 1e-4:
+                reached = True
+            msg = rclpy.msg.Bool()
+            msg.data = reached
+            self.target_pose_reached_pub.publish(msg)
 
 
     def tf_callback(self):
