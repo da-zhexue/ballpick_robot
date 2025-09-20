@@ -1,12 +1,12 @@
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist, PoseStamped
+from std_msgs.msg import Bool
 import tf2_geometry_msgs
 import numpy as np
 from tf2_ros import Buffer, TransformListener
 import tf_transformations
 import serial
-import serial.tools.list_ports
 import struct
 import threading
 import time
@@ -93,57 +93,6 @@ class PositionController:
 
         return linear_x, angular_z
 
-class PurePursuitController:
-    def __init__(self, lookahead_distance=0.1, max_linear_speed=0.3, max_angular_speed=1.0):
-        self.lookahead_distance = lookahead_distance  # 前视距离 (米)
-        self.max_linear_speed = max_linear_speed      # 最大线速度 (m/s)
-        self.max_angular_speed = max_angular_speed    # 最大角速度 (rad/s)
-
-    def get_control(self, current_pose, target_pose):
-        """
-        计算控制指令
-        :param current_pose: (x, y, yaw) 当前坐标 (米, 米, 弧度)
-        :param target_pose: (x, y, yaw) 目标坐标 (米, 米, 弧度)
-        :return: (linear_x, angular_z)
-        """
-        x, y, yaw = current_pose
-        tx, ty, tyaw = target_pose
-
-        # 计算到目标点的距离和角度
-        dx = tx - x
-        dy = ty - y
-        distance = math.hypot(dx, dy)
-
-        # 到目标点的方向（全局坐标系下）
-        target_theta = math.atan2(dy, dx)
-        # 与当前车体朝向夹角
-        alpha = self._normalize_angle(target_theta - yaw)
-
-        # 若距离小于前视距离，则直接减速到目标
-        if distance < 0.1:
-            return 0.0, 0.0
-
-        # 纯追踪算法核心公式
-        # 转向半径 R = L / (2*sin(alpha))
-        # 角速度 w = v / R
-        # 转化后：w = 2*v*sin(alpha) / L
-        # v = max_linear_speed * (距离/前视距离, 最大为1)
-        v = min(self.max_linear_speed, self.max_linear_speed * (distance / self.lookahead_distance))
-        w = 2 * v * math.sin(alpha) / self.lookahead_distance
-
-        # 限制角速度
-        w = max(-self.max_angular_speed, min(self.max_angular_speed, w))
-
-        return v, -w
-
-    def _normalize_angle(self, angle):
-        """将任意弧度归一化到 [-pi, pi]"""
-        while angle > math.pi:
-            angle -= 2.0 * math.pi
-        while angle < -math.pi:
-            angle += 2.0 * math.pi
-        return angle
-
 class RobotControl(Node):
 
     def __init__(self, port=None, baudrate=115200):
@@ -153,11 +102,9 @@ class RobotControl(Node):
         self.goal_subcriber_ = self.create_subscription(PoseStamped, 'goal_pose', self.goal_pose_callback, 10) # 创建订阅者
         self.tf_buffer_ = Buffer()
         self.tf_listener_ = TransformListener(self.tf_buffer_, self) # 创建tf监听器
-        self.controller_type = "pid_position"  # "pure_pursuit"/"pid_position"/"stop_and_wait"
+        self.controller_type = "pid_position"  # "pid_position"/"stop_and_wait"
         self.target_pose = (1.0, -0.2, 0.0)  # 目标位姿 (x, y, yaw) 
-        if self.controller_type == "pure_pursuit":
-            self.pure_pursuit_controller = PurePursuitController()
-        elif self.controller_type == "pid_position":
+        if self.controller_type == "pid_position":
             self.position_controller = PositionController()
                   
         self.tf_timer = self.create_timer(0.1, self.tf_callback) # 创建tf定时器
@@ -196,8 +143,7 @@ class RobotControl(Node):
         else:
             self.get_logger().error("串口连接失败")
         
-        self.target_pose_reached_pub = self.create_publisher(
-        rclpy.msg.Bool, '/target_pose_reached', 10)
+        self.target_pose_reached_pub = self.create_publisher(Bool, '/target_pose_reached', 10)
 
     def _auto_detect_port(self):
         """自动检测可能的USB串口设备"""
@@ -433,7 +379,7 @@ class RobotControl(Node):
             # 发布目标到达状态
             if abs(target_linear_x) < 1e-4:
                 reached = True
-            msg = rclpy.msg.Bool()
+            msg = Bool()
             msg.data = reached
             self.target_pose_reached_pub.publish(msg)
 

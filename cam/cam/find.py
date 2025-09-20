@@ -2,6 +2,7 @@
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import PointStamped
+from std_msgs.msg import Bool 
 import torch
 import cv2
 import numpy as np
@@ -21,28 +22,24 @@ class BallDetectNode(Node):
         camera_height = 0.5  # 相机高度0.5米
         camera_pitch = np.radians(30)  # 相机向下倾斜30度
         self.detected_point = np.array([320, 300]) # 目标中心位置
-        # 创建定位器
+
         self.localizer = ItemLocalizer(camera_matrix, dist_coeffs, camera_height, camera_pitch)
 
-        # 创建坐标发布者
         self.coord_publisher = self.create_publisher(PointStamped, 'ball_center_coords', 10)
-        
-        # 初始化YOLOv5模型
-        self.model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True)
+        self.target_pose_reached = False # 目标位姿是否已到达
+        self.target_pose_reached_subscriber = self.create_subscription(Bool, 'target_pose_reached', self.target_pose_reached_callback, 10)
+
+        self.get_logger().info("正在加载YOLOv5模型...")
+        self.model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True, force_reload=False, trust_repo=True)
+        self.get_logger().info("YOLOv5模型加载成功")
         self.model.conf = 0.5  # 设置置信度阈值
-        
-        # 设置球类类别ID（COCO数据集中'sports ball'的ID）
-        self.ball_class_id = 32  # COCO数据集中球类的ID
-        
-        # 设置相机（这里使用默认相机，可根据需要修改）
+        self.ball_class_id = 32 
         self.cap = cv2.VideoCapture(0)
         if not self.cap.isOpened():
             self.get_logger().error("无法打开相机")
             return
         
-        # 创建定时器，定期处理图像
         self.timer = self.create_timer(0.1, self.process_frame)  # 10Hz
-        
         self.get_logger().info("球类检测节点已启动，开始发布球体中心坐标...")
 
     def process_frame(self):
@@ -51,80 +48,52 @@ class BallDetectNode(Node):
             self.get_logger().error("无法获取相机帧")
             return
         
-        # 使用YOLOv5进行检测
         results = self.model(frame)
-        
-        # 获取检测结果（像素坐标）
         detections = results.xyxy[0].numpy()  # 格式为[x1, y1, x2, y2, confidence, class]
-        
-        # 处理每个检测到的物体
         for det in detections:
             if len(det) < 6:
                 continue
-                
             x1, y1, x2, y2, conf, cls_id = det
-            
-            # 只处理球类物体
-            if int(cls_id) != self.ball_class_id:
-                continue
-                
-            # 只处理置信度高于阈值的检测结果
+
+            # if int(cls_id) != self.ball_class_id:
+            #     continue
             if conf < self.model.conf:
                 continue
-                
-            # 计算中心点坐标
+
             center_x = (x1 + x2) / 2
             center_y = (y1 + y2) / 2
 
             self.detected_point = np.array([center_x, center_y])
             item_position = self.localizer.calculate_item_position(self.detected_point)
             # print(f"物品在小车坐标系中的位置: X={item_position[0]:.2f}m, Y={item_position[1]:.2f}m, Z={item_position[2]:.2f}m")
-            
-            # 计算球的尺寸（像素）
+
             ball_width = x2 - x1
             ball_height = y2 - y1
-            
-            # 创建并发布坐标消息
+
             point_msg = PointStamped()
             point_msg.header.stamp = self.get_clock().now().to_msg()
             point_msg.header.frame_id = "camera_frame"
             point_msg.point.x = float(item_position[0])
             point_msg.point.y = float(item_position[1])
             point_msg.point.z = 0.0  # 2D图像，z坐标为0
+            if self.target_pose_reached:
+                self.coord_publisher.publish(point_msg)
+                self.get_logger().info(f"已到达目标位姿，发布球体中心坐标: ({item_position[0]:.2f}, {item_position[1]:.2f})")
             
-            self.coord_publisher.publish(point_msg)
-            
-            # 获取类别名称
             class_name = self.model.names[int(cls_id)]
-            
-            # 输出到控制台
             self.get_logger().info(f"检测到{class_name}中心坐标: ({item_position[0]:.2f}, {item_position[1]:.2f}), "
                                   f"尺寸: {ball_width:.1f}x{ball_height:.1f}, "
                                   f"置信度: {conf:.2f}")
-            
-            # 在图像上绘制检测框和标签
             label = f"{class_name} {conf:.2f}"
-            
-            # 绘制边界框（使用绿色）
             cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
-            
-            # 绘制标签背景
             text_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)[0]
             cv2.rectangle(frame, (int(x1), int(y1)-25), (int(x1)+text_size[0], int(y1)), (0, 255, 0), -1)
-            
-            # 绘制标签文字
             cv2.putText(frame, label, (int(x1), int(y1)-5),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 2)
-            
-            # 在图像上绘制中心点（红色）
             cv2.circle(frame, (int(center_x), int(center_y)), 5, (0, 0, 255), -1)
-            
-            # 显示球体尺寸信息
             size_text = f"W:{ball_width:.1f} H:{ball_height:.1f}"
             cv2.putText(frame, size_text, (int(x1), int(y2)+20),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-        
-        # 显示结果图像
         cv2.imshow('Ball Detection', frame)
         cv2.waitKey(1)
 
@@ -132,6 +101,9 @@ class BallDetectNode(Node):
         self.cap.release()
         cv2.destroyAllWindows()
         super().destroy_node()
+
+    def target_pose_reached_callback(self, msg):
+        self.target_pose_reached = msg.data 
 
 class ItemLocalizer:
     def __init__(self, camera_matrix, dist_coeffs, camera_height, camera_pitch):
