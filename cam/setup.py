@@ -21,6 +21,8 @@ setup(
     entry_points={
         'console_scripts': [
             'cam = cam.cam:main',
+            'find = cam.find:main',
+            'get_cam_matrix = cam.get_cam_matrix:main'
         ],
     },
 )

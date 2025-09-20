@@ -1,8 +1,15 @@
+激活conda环境  
+  
 把整个文件夹放在ros2_ws下，把该文件夹名字改为src，然后在ros2_ws下打开终端，输入以下命令：  
 ```
-colcon build
+colcon build(如果build后运行出现错误找不到torch，可以能要python -m colcon build)
 ```
 编译整个ros2_ws。  
+  
+如果还有一长串报错，可以终端输入：
+'''
+conda install -c conda-forge libstdcxx-ng
+'''
   
 然后在终端输入：  
 ```
@@ -59,4 +66,4 @@ ros2 launch ballpick_robot robot_start.launch.py
   
 4. 使用标定结果  
   
-标定完成后，您可以将得到的 camera_matrix 和 dist_coeffs 用于cam.py代码中。  
+标定完成后，您可以将得到的 camera_matrix 和 dist_coeffs 用于find.py代码中。  
