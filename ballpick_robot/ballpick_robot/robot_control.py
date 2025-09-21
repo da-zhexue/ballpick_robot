@@ -133,6 +133,8 @@ class RobotControl(Node):
         self.roll = 0.0
         self.pitch = 0.0
         self.yaw = 0.0
+
+        self.reached = False
             
         # 自动检测串口设备
         if not self.port:
@@ -356,7 +358,7 @@ class RobotControl(Node):
     def timer_callback(self):
         # 发送控制指令
         if self.running:
-            reached = False
+            self.reached = False
             if self.controller_type == "stop_and_wait":
                 self.send_control_command(500, 0, 0.5)
             elif self.controller_type == "pure_pursuit":
@@ -378,9 +380,9 @@ class RobotControl(Node):
                 self.send_control_command(target_linear_x * 1000, 0, target_angular_z)  # 将m/s转换为mm/s
             # 发布目标到达状态
             if abs(target_linear_x) < 1e-4:
-                reached = True
+                self.reached = True
             msg = Bool()
-            msg.data = reached
+            msg.data = self.reached
             self.target_pose_reached_pub.publish(msg)
 
 
@@ -420,6 +422,7 @@ class RobotControl(Node):
             target_qw = transformed_pose.orientation.w
             (target_roll, target_pitch, target_yaw) = tf_transformations.euler_from_quaternion([target_qx, target_qy, target_qz, target_qw])
             self.target_pose = (transformed_pose.position.x, transformed_pose.position.y, target_yaw)
+            self.reached = False   
             self.get_logger().info(f"目标位姿: X={self.target_pose[0]:.1f} mm, Y={self.target_pose[1]:.1f} mm, θ={math.degrees(self.target_pose[2]):.1f}°")
         
     
