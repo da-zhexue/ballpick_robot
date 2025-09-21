@@ -40,8 +40,8 @@ def generate_launch_description():
     )
 
     goal_pub = Node(
-        package='ballpick_robot',
-        executable='goal_pub_temp',
+        package='cam',
+        executable='find',
         output='screen',
     )
 
@@ -49,6 +49,6 @@ def generate_launch_description():
         lidar_node,
         imu_node,
         cartographer_node,
+        goal_pub,
         delayed_robot_control,
-        goal_pub
     ])
