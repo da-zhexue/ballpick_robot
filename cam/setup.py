@@ -20,7 +20,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'cam = cam.cam:main',
+            'find_NPU = cam.find_NPU:main',
             'find = cam.find:main',
             'get_cam_matrix = cam.get_cam_matrix:main'
         ],
