@@ -11,14 +11,13 @@ class BallDetectNode(Node):
     def __init__(self):
         super().__init__('ball_detect_node')
         
-        # 示例相机参数 (需要替换为实际标定结果)
-        camera_matrix = np.array([[500, 0, 320],
-                                [0, 500, 240],
+        camera_matrix = np.array([[721.57587361, 0, 377.82526819]
+                                [0, 650.10034963, 241.51849462]
                                 [0, 0, 1]], dtype=np.float32)
-        
-        dist_coeffs = np.array([-0.1, 0.01, 0, 0, 0], dtype=np.float32)  # 示例畸变系数
-        
-        # 相机安装参数 (需要替换为实际测量值)
+
+        dist_coeffs = np.array([-0.22188331,  0.93498583,  0.01635225,  0.01073424, -1.45978984], dtype=np.float32) 
+
+        # 相机安装参数
         camera_height = 0.5  # 相机高度0.5米
         camera_pitch = np.radians(30)  # 相机向下倾斜30度
         self.detected_point = np.array([320, 300]) # 目标中心位置

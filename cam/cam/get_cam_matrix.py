@@ -2,6 +2,7 @@ import numpy as np
 import cv2
 import glob
 import os
+import time
 
 def calibrate_camera(images_path, chessboard_size, square_size, output_file=None):
     """
@@ -85,6 +86,7 @@ def calibrate_camera(images_path, chessboard_size, square_size, output_file=None
     print(f"重投影误差: {ret}")
     print("\n相机内参矩阵:")
     print(camera_matrix)
+    time.sleep(0.1)
     print("\n畸变系数:")
     print(dist_coeffs)
     
@@ -161,13 +163,55 @@ def test_calibration(images_path, camera_matrix, dist_coeffs):
     
     cv2.destroyAllWindows()
 
+def capture_calibration_images_from_camera(chessboard_size, save_dir, max_images=20):
+    """
+    从摄像头实时采集标定图像
+    参数:
+    - chessboard_size: 棋盘格内角点数量 (width, height)
+    - save_dir: 保存标定图像的文件夹
+    - max_images: 最多采集多少张有效图像
+    """
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+    cap = cv2.VideoCapture(1)
+    count = 0
+    print("按空格采集有效棋盘格图像，按ESC退出")
+    while count < max_images:
+        ret, frame = cap.read()
+        if not ret:
+            print("无法读取摄像头")
+            break
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        found, corners = cv2.findChessboardCorners(gray, chessboard_size, None)
+        display = frame.copy()
+        if found:
+            cv2.drawChessboardCorners(display, chessboard_size, corners, found)
+            cv2.putText(display, f"Press SPACE to save ({count+1}/{max_images})", (20,40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0,255,0), 2)
+        else:
+            cv2.putText(display, "No chessboard detected", (20,40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,255), 2)
+        cv2.imshow('Camera Calibration', display)
+        key = cv2.waitKey(1)
+        if key == 27:  # ESC退出
+            break
+        if found and key == 32:  # 空格保存
+            img_path = os.path.join(save_dir, f"calib_{count+1:02d}.jpg")
+            cv2.imwrite(img_path, frame)
+            print(f"已保存: {img_path}")
+            count += 1
+    cap.release()
+    cv2.destroyAllWindows()
+    print(f"采集完成，共保存 {count} 张图像")
+
 if __name__ == "__main__":
     # 设置参数
-    images_path = "calibration_images/*.jpg"  # 标定图像路径
-    chessboard_size = (9, 6)  # 棋盘格内角点数量 (width, height)
-    square_size = 0.025  # 每个棋盘格方格的物理尺寸 (单位: 米，这里是2.5厘米)
-    calibration_file = "camera_calibration.npz"  # 保存标定结果的文件
+    chessboard_size = (9, 6)
+    square_size = 0.025
+    calibration_file = "camera_calibration.npz"
+    save_dir = "calibration_images"
     
+    # 采集标定图像
+    capture_calibration_images_from_camera(chessboard_size, save_dir, max_images=20)
+    images_path = os.path.join(save_dir, "*.jpg")
     # 执行相机标定
     camera_matrix, dist_coeffs, rvecs, tvecs = calibrate_camera(
         images_path, chessboard_size, square_size, calibration_file)
